@@ -155,6 +155,82 @@
     padding: 20px;
   }
 
+  .source-switch {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .src-btn {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .src-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .src-btn.active {
+    color: var(--bg);
+    background: var(--text);
+    border-color: var(--text);
+  }
+  .src-btn:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
+
+  .upload-panel {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 16px 18px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    flex-wrap: wrap;
+  }
+  .upload-panel.visible { display: flex; }
+
+  .upload-panel input[type="file"] {
+    flex: 1;
+    min-width: 200px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .upload-panel input[type="file"]::file-selector-button {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 7px 12px;
+    margin-right: 10px;
+    cursor: pointer;
+  }
+  .upload-panel input[type="file"]::file-selector-button:hover { border-color: var(--good); }
+
+  .upload-hint {
+    width: 100%;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+  }
+
+  button.ctrl:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  button.ctrl:disabled:hover { border-color: var(--hairline); color: var(--text); }
+
   .error-banner {
     display: none;
     margin-top: 20px;
@@ -271,9 +347,21 @@
       </div>
     </div>
 
+    <div class="source-switch" id="sourceSwitch">
+      <button class="src-btn active" data-mode="live" type="button">Live Camera</button>
+      <button class="src-btn" data-mode="video" type="button">Upload Video</button>
+      <button class="src-btn" data-mode="image" type="button">Upload Image</button>
+    </div>
+
+    <div class="upload-panel" id="uploadPanel">
+      <input type="file" id="fileInput" accept="video/*" />
+      <button class="ctrl" id="runUploadBtn">Run Inspection</button>
+      <span class="upload-hint" id="uploadHint">Choose a video file, then run inspection.</span>
+    </div>
+
     <div class="error-banner" id="errorBanner"></div>
 
-    <footer>Custom frontend · served directly from the inference backend</footer>
+    <footer> · Automated Optical Inspection (AOI) system</footer>
   </div>
 
 <script>
@@ -287,8 +375,14 @@
   const errorBanner = document.getElementById('errorBanner');
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
+  const sourceSwitch = document.getElementById('sourceSwitch');
+  const uploadPanel = document.getElementById('uploadPanel');
+  const fileInput = document.getElementById('fileInput');
+  const runUploadBtn = document.getElementById('runUploadBtn');
+  const uploadHint = document.getElementById('uploadHint');
 
   let pollTimer = null;
+  let currentMode = 'live'; // 'live' | 'video' | 'image'
 
   function setDot(state) {
     statusDot.className = 'dot ' + state;
@@ -303,18 +397,44 @@
     errorBanner.style.display = 'block';
   }
 
+  function resetCounts() {
+    totalValue.textContent = '0';
+    tabletValue.textContent = '0';
+    brokenValue.textContent = '0';
+  }
+
+  function showFrame(src) {
+    videoImg.src = src;
+    videoImg.style.display = 'block';
+    placeholder.style.display = 'none';
+  }
+
+  function clearFrame() {
+    videoImg.removeAttribute('src');
+    videoImg.style.display = 'none';
+    placeholder.style.display = 'flex';
+  }
+
+  // ---- Live camera (Start/Stop, MJPEG + polling) ----
+
   async function startStream() {
     setDot('idle');
     statusText.textContent = 'Connecting…';
+    let res;
     try {
-      await fetch('/start', { method: 'POST' });
+      res = await fetch('/start', { method: 'POST' });
     } catch (e) {
       showError('Could not reach the backend. Is app.py running?');
       return;
     }
-    videoImg.src = '/video_feed?t=' + Date.now();
-    videoImg.style.display = 'block';
-    placeholder.style.display = 'none';
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showError(data.message || 'Could not start the pipeline.');
+      statusText.textContent = 'Idle';
+      setDot('idle');
+      return;
+    }
+    showFrame('/video_feed?t=' + Date.now());
     startPolling();
   }
 
@@ -322,9 +442,7 @@
     try {
       await fetch('/stop', { method: 'POST' });
     } catch (e) { /* ignore */ }
-    videoImg.removeAttribute('src');
-    videoImg.style.display = 'none';
-    placeholder.style.display = 'flex';
+    clearFrame();
     statusText.textContent = 'Idle';
     setDot('idle');
     stopPolling();
@@ -344,13 +462,18 @@
         if (!data.running) {
           statusText.textContent = data.error ? 'Error' : 'Idle';
           setDot('idle');
+          if (currentMode === 'video') {
+            // The uploaded video reached its end - the backend already
+            // stopped the pipeline on its own.
+            stopPolling();
+          }
           return;
         }
         if (data.broken > 0) {
           statusText.textContent = 'Defect detected';
           setDot('alert');
         } else {
-          statusText.textContent = 'Running';
+          statusText.textContent = currentMode === 'video' ? 'Processing video' : 'Running';
           setDot('live');
         }
       } catch (e) {
@@ -366,6 +489,135 @@
       pollTimer = null;
     }
   }
+
+  // ---- Uploaded video (same streamed pipeline, different source) ----
+
+  async function runUploadedVideo(file) {
+    resetCounts();
+    showError(null);
+    setDot('idle');
+    statusText.textContent = 'Uploading…';
+    runUploadBtn.disabled = true;
+
+    const form = new FormData();
+    form.append('file', file);
+
+    let res;
+    try {
+      res = await fetch('/upload_video', { method: 'POST', body: form });
+    } catch (e) {
+      showError('Could not reach the backend. Is app.py running?');
+      statusText.textContent = 'Idle';
+      runUploadBtn.disabled = false;
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    runUploadBtn.disabled = false;
+
+    if (!res.ok) {
+      showError(data.message || 'Could not process the uploaded video.');
+      statusText.textContent = 'Idle';
+      return;
+    }
+
+    showFrame('/video_feed?t=' + Date.now());
+    startPolling();
+  }
+
+  // ---- Uploaded image (single request/response, no streaming) ----
+
+  async function runUploadedImage(file) {
+    resetCounts();
+    showError(null);
+    clearFrame();
+    setDot('idle');
+    statusText.textContent = 'Analyzing…';
+    runUploadBtn.disabled = true;
+
+    const form = new FormData();
+    form.append('file', file);
+
+    let res;
+    try {
+      res = await fetch('/upload_image', { method: 'POST', body: form });
+    } catch (e) {
+      showError('Could not reach the backend. Is app.py running?');
+      statusText.textContent = 'Idle';
+      runUploadBtn.disabled = false;
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    runUploadBtn.disabled = false;
+
+    if (!res.ok) {
+      showError(data.message || 'Could not process the uploaded image.');
+      statusText.textContent = 'Idle';
+      return;
+    }
+
+    showFrame(data.image);
+    totalValue.textContent = data.total;
+    tabletValue.textContent = data.tablet;
+    brokenValue.textContent = data.broken;
+    statusText.textContent = data.broken > 0 ? 'Defect detected' : 'Done';
+    setDot(data.broken > 0 ? 'alert' : 'live');
+  }
+
+  // ---- Mode switching ----
+
+  async function setMode(mode) {
+    if (mode === currentMode) return;
+
+    // Leaving any active pipeline before switching sources.
+    await stopStream();
+    resetCounts();
+    showError(null);
+    clearFrame();
+    fileInput.value = '';
+
+    currentMode = mode;
+
+    [...sourceSwitch.querySelectorAll('.src-btn')].forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+
+    if (mode === 'live') {
+      uploadPanel.classList.remove('visible');
+      startBtn.style.display = '';
+      stopBtn.style.display = '';
+      statusText.textContent = 'Idle';
+    } else {
+      uploadPanel.classList.add('visible');
+      startBtn.style.display = 'none';
+      stopBtn.style.display = '';
+      statusText.textContent = 'Idle';
+      if (mode === 'video') {
+        fileInput.accept = 'video/*';
+        uploadHint.textContent = 'Choose a video file, then run inspection.';
+      } else {
+        fileInput.accept = 'image/*';
+        uploadHint.textContent = 'Choose an image file, then run inspection.';
+      }
+    }
+  }
+
+  sourceSwitch.addEventListener('click', (e) => {
+    const btn = e.target.closest('.src-btn');
+    if (btn) setMode(btn.dataset.mode);
+  });
+
+  runUploadBtn.addEventListener('click', () => {
+    const file = fileInput.files[0];
+    if (!file) {
+      showError('Choose a file first.');
+      return;
+    }
+    if (currentMode === 'video') {
+      runUploadedVideo(file);
+    } else if (currentMode === 'image') {
+      runUploadedImage(file);
+    }
+  });
 
   startBtn.addEventListener('click', startStream);
   stopBtn.addEventListener('click', stopStream);

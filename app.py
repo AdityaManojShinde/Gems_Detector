@@ -8,18 +8,24 @@ Run with:
     (or: uvicorn app:app --host 0.0.0.0 --port 7860)
 """
 
+import base64
 import os
 import threading
 import time
+import uuid
+from typing import Annotated
 
 import anyio
 import cv2
+import numpy as np
 import torch
+from fastapi import File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from ultralytics import YOLO
 
 from utils import (
     BoxSmoother,
+    FileFrame,
     FreshestFrame,
     SharedState,
     draw_boxes,
@@ -42,9 +48,8 @@ except ImportError:
         "`pip install -U gradio` if you specifically want gradio.Server."
     )
 
-# ============================================================
-# CONFIG - edit these values directly
-# ============================================================
+
+# CONFIG 
 MODEL_PATH = "./model/best.pt"       # path to trained YOLO .pt file
 STREAM_URL = "http://192.168.1.4:8080/video"                # IP webcam stream URL
 CONF_THRESHOLD = 0.4                                        # confidence threshold
@@ -62,7 +67,10 @@ NMS_IOU_THRESHOLD = 0.5
 
 DISPLAY_MAX_WIDTH = 640                          # downscale frames before JPEG-encoding
 TARGET_DISPLAY_FPS = 20                          # cap the encode rate so JPEG-encoding
-                                  
+
+UPLOAD_DIR = "./uploads"                         # where uploaded video/image files are saved
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024             # 500MB safety cap on uploaded files
+
 
 USE_HALF = HALF_PRECISION and DEVICE.startswith("cuda")
 
@@ -85,8 +93,6 @@ PREDICT_CONF = min([CONF_THRESHOLD, *CLASS_CONF_THRESHOLDS.values()])
 
 
 
-
-
 shared = SharedState()
 _model_holder = {"model": None}
 _worker_thread = None
@@ -103,11 +109,11 @@ def _load_model():
     return _model_holder["model"]
 
 
-def _inference_worker(stop_event):
+def _inference_worker(stop_event, source, is_live):
     """
-    Owns the camera connection and the YOLO/tracker/smoother pipeline.
-    Runs independently of any HTTP request - starting/stopping/refreshing
-    browser tabs never touches this loop.
+    Owns the frame source (live camera or an uploaded video file) and the
+    YOLO/tracker/smoother pipeline. Runs independently of any HTTP request -
+    starting/stopping/refreshing browser tabs never touches this loop.
     """
     try:
         model = _load_model()
@@ -117,8 +123,13 @@ def _inference_worker(stop_event):
             shared.running = False
         return
 
-    print(f"Connecting to stream: {STREAM_URL}")
-    stream = FreshestFrame(STREAM_URL)
+    if is_live:
+        print(f"Connecting to stream: {source}")
+        stream = FreshestFrame(source)
+    else:
+        print(f"Reading uploaded video: {source}")
+        stream = FileFrame(source)
+
     smoother = BoxSmoother()
 
     min_interval = 1.0 / TARGET_DISPLAY_FPS
@@ -128,6 +139,8 @@ def _inference_worker(stop_event):
         while not stop_event.is_set():
             frame = stream.read()
             if frame is None:
+                if stream.is_finished:
+                    break
                 time.sleep(0.005)
                 continue
 
@@ -228,21 +241,151 @@ def counts():
             "broken": shared.broken_count,
             "running": shared.running,
             "error": shared.error,
+            "mode": shared.mode,
         })
+
+
+def _start_worker(source, is_live, mode):
+    global _worker_thread, _stop_event
+    with shared.lock:
+        if shared.running:
+            return JSONResponse({"status": "already_running"}, status_code=409)
+        shared.running = True
+        shared.error = None
+        shared.mode = mode
+    _stop_event = threading.Event()
+    _worker_thread = threading.Thread(
+        target=_inference_worker, args=(_stop_event, source, is_live), daemon=True
+    )
+    _worker_thread.start()
+    return JSONResponse({"status": "started", "mode": mode})
 
 
 @app.post("/start")
 def start_pipeline():
-    global _worker_thread, _stop_event
+    """Start (or resume) live inspection from the configured camera/IP stream."""
+    return _start_worker(STREAM_URL, is_live=True, mode="live")
+
+
+@app.post("/upload_video")
+async def upload_video(file: Annotated[UploadFile, File(...)]):
+    """
+    Save an uploaded video file and run the same detect/track/smooth
+    pipeline over it, frame by frame, streamed to /video_feed exactly
+    like the live camera. The pipeline stops itself once the file ends.
+    """
     with shared.lock:
         if shared.running:
-            return JSONResponse({"status": "already_running"})
-        shared.running = True
+            return JSONResponse(
+                {"status": "error", "message": "Pipeline already running - stop it first."},
+                status_code=409,
+            )
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".mp4"
+    dest_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
+
+    size = 0
+    too_large = False
+    async with await anyio.open_file(dest_path, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                too_large = True
+                break
+            await out.write(chunk)
+
+    if too_large:
+        os.remove(dest_path)
+        return JSONResponse({"status": "error", "message": "File too large."}, status_code=413)
+
+    probe = cv2.VideoCapture(dest_path)
+    opened = probe.isOpened()
+    probe.release()
+    if not opened:
+        os.remove(dest_path)
+        return JSONResponse(
+            {"status": "error", "message": "Could not open uploaded file as a video."},
+            status_code=400,
+        )
+
+    return _start_worker(dest_path, is_live=False, mode="video")
+
+
+@app.post("/upload_image")
+async def upload_image(file: Annotated[UploadFile, File(...)]):
+    """
+    Run a single detection pass over an uploaded still image and return
+    the annotated result inline (no MJPEG stream / worker thread needed
+    for a single frame).
+    """
+    with shared.lock:
+        if shared.running:
+            return JSONResponse(
+                {"status": "error", "message": "Pipeline already running - stop it first."},
+                status_code=409,
+            )
+
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"status": "error", "message": "File too large."}, status_code=413)
+
+    np_arr = np.frombuffer(contents, dtype=np.uint8)
+    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return JSONResponse(
+            {"status": "error", "message": "Could not decode uploaded file as an image."},
+            status_code=400,
+        )
+
+    try:
+        model = _load_model()
+    except FileNotFoundError as exc:
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to load model: {exc}"}, status_code=500
+        )
+
+    with shared.lock:
+        shared.mode = "image"
         shared.error = None
-    _stop_event = threading.Event()
-    _worker_thread = threading.Thread(target=_inference_worker, args=(_stop_event,), daemon=True)
-    _worker_thread.start()
-    return JSONResponse({"status": "started"})
+
+    results = model.predict(
+        frame,
+        conf=PREDICT_CONF,
+        imgsz=IMGSZ,
+        device=DEVICE,
+        agnostic_nms=AGNOSTIC_NMS,
+        iou=NMS_IOU_THRESHOLD,
+        verbose=False,
+    )
+    result = results[0]
+
+    detections = extract_detections(result, CONF_THRESHOLD, CLASS_CONF_THRESHOLDS)
+    annotated, counts = draw_boxes(frame, detections, CLASS_COLORS, DEFAULT_COLOR)
+    small = resize_for_display(annotated, DISPLAY_MAX_WIDTH)
+
+    ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        return JSONResponse(
+            {"status": "error", "message": "Failed to encode result image."}, status_code=500
+        )
+
+    b64_image = base64.b64encode(buf.tobytes()).decode("ascii")
+    total = sum(counts.values())
+
+    with shared.lock:
+        shared.total_count = total
+        shared.tablet_count = counts.get(TABLET_CLASS_NAME, 0)
+        shared.broken_count = counts.get(BROKEN_CLASS_NAME, 0)
+
+    return JSONResponse({
+        "status": "ok",
+        "mode": "image",
+        "image": f"data:image/jpeg;base64,{b64_image}",
+        "total": total,
+        "tablet": counts.get(TABLET_CLASS_NAME, 0),
+        "broken": counts.get(BROKEN_CLASS_NAME, 0),
+    })
 
 
 @app.post("/stop")

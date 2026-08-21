@@ -9,6 +9,7 @@ OVERLAP_IOU_THRESH = 0.45
 
 # Pipeline building blocks
 
+
 class FreshestFrame:
     """
     Reads frames from a VideoCapture in a background thread and always
@@ -58,6 +59,53 @@ class FreshestFrame:
         self.thread.join(timeout=2)
         self.cap.release()
 
+    @property
+    def is_finished(self):
+        # A live camera/IP stream doesn't have a natural "end" - the
+        # worker just keeps waiting for the next frame.
+        return False
+
+
+class FileFrame:
+    """
+    Reads frames sequentially from an uploaded video file. Unlike
+    FreshestFrame this does NOT drop frames (there's no "freshest" frame
+    to chase for a file that isn't live) - every frame gets processed
+    once, in order. Sets `finished` once the file is exhausted so the
+    caller can stop the pipeline instead of polling forever.
+    """
+
+    def __init__(self, path, loop=False):
+        self.path = path
+        self.loop = loop
+        self.cap = cv2.VideoCapture(path)
+        self.finished = False
+        self.stopped = False
+
+    def read(self):
+        if self.stopped:
+            return None
+
+        ret, frame = self.cap.read()
+        if not ret:
+            if self.loop:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = self.cap.read()
+                if ret:
+                    return frame
+            self.finished = True
+            return None
+
+        return frame
+
+    def stop(self):
+        self.stopped = True
+        self.cap.release()
+
+    @property
+    def is_finished(self):
+        return self.finished
+
 
 class BoxSmoother:
     """
@@ -69,8 +117,12 @@ class BoxSmoother:
     "double up" for a beat whenever ByteTrack swaps a track's ID.
     """
 
-    def __init__(self, alpha=SMOOTHING_ALPHA, hold_frames=HOLD_FRAMES,
-                 overlap_iou_thresh=OVERLAP_IOU_THRESH):
+    def __init__(
+        self,
+        alpha=SMOOTHING_ALPHA,
+        hold_frames=HOLD_FRAMES,
+        overlap_iou_thresh=OVERLAP_IOU_THRESH,
+    ):
         self.alpha = alpha
         self.hold_frames = hold_frames
         self.overlap_iou_thresh = overlap_iou_thresh
@@ -91,7 +143,12 @@ class BoxSmoother:
                     for new, old in zip(box, old_box)
                 )
 
-            self.tracks[track_id] = {"box": box, "cls_name": cls_name, "conf": conf, "age": 0}
+            self.tracks[track_id] = {
+                "box": box,
+                "cls_name": cls_name,
+                "conf": conf,
+                "age": 0,
+            }
 
         stale_ids = []
         for track_id, data in self.tracks.items():
@@ -140,8 +197,8 @@ class BoxSmoother:
             del self.tracks[tid]
 
 
-
 # Shared state + background inference worker
+
 
 class SharedState:
     def __init__(self):
@@ -153,6 +210,8 @@ class SharedState:
         self.broken_count = 0
         self.running = False
         self.error = None
+        self.mode = "live"  # "live" | "video" | "image"
+
 
 def iou(box_a, box_b):
     """Standard IOU between two (x1, y1, x2, y2) boxes."""
@@ -197,7 +256,9 @@ def resize_for_display(frame, max_width):
     if width <= max_width:
         return frame
     scale = max_width / width
-    return cv2.resize(frame, (max_width, int(height * scale)), interpolation=cv2.INTER_AREA)
+    return cv2.resize(
+        frame, (max_width, int(height * scale)), interpolation=cv2.INTER_AREA
+    )
 
 
 def draw_boxes(frame, detections, class_colors, default_color):
