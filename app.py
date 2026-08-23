@@ -1,13 +1,3 @@
-"""
-Tablet quality-control YOLO pipeline 
-- custom frontend served from a
-gradio.Server / FastAPI backend (no default gr.Blocks UI).
-
-Run with:
-    python app.py
-    (or: uvicorn app:app --host 0.0.0.0 --port 7860)
-"""
-
 import base64
 import os
 import threading
@@ -40,6 +30,7 @@ try:
     app = Server()
 except ImportError:
     from fastapi import FastAPI
+    from gradio import Server
 
     app = FastAPI()
     print(
@@ -50,7 +41,7 @@ except ImportError:
 
 
 # CONFIG 
-MODEL_PATH = "./model/best.pt"       # path to trained YOLO .pt file
+MODEL_PATH = "./model/yolo11s_v2.pt"       # path to trained YOLO .pt file
 STREAM_URL = "http://192.168.1.4:8080/video"                # IP webcam stream URL
 CONF_THRESHOLD = 0.4                                        # confidence threshold
 IMGSZ = 640                                                 # inference image size
