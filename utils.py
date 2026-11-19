@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -7,44 +8,97 @@ SMOOTHING_ALPHA = 0.4
 HOLD_FRAMES = 8
 OVERLAP_IOU_THRESH = 0.45
 
+# How many consecutive failed reads before a camera is considered lost
+MAX_READ_FAILURES = 40
+# How many tries to grab a first frame when opening a camera
+OPEN_TEST_READS = 15
+
+
+class CameraError(Exception):
+    """Raised when a local camera cannot be opened or read."""
+
+
 # Pipeline building blocks
+
+
+def _open_capture(index):
+    """
+    Open a local camera by index and verify it really delivers frames.
+    Returns an opened cv2.VideoCapture, or None if the camera is missing,
+    busy, or not producing frames.
+    """
+    backend = cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY
+    try:
+        cap = cv2.VideoCapture(index, backend)
+    except cv2.error:
+        return None
+
+    if not cap.isOpened():
+        cap.release()
+        return None
+
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # isOpened() can be True for a device that never delivers a frame,
+    # so make sure we can actually read one.
+    for _ in range(OPEN_TEST_READS):
+        ok, _frame = cap.read()
+        if ok:
+            return cap
+        time.sleep(0.1)
+
+    cap.release()
+    return None
 
 
 class FreshestFrame:
     """
-    Reads frames from a VideoCapture in a background thread and always
-    exposes only the MOST RECENT frame, dropping stale ones so delay
+    Reads frames from a local camera (by index) in a background thread and
+    always exposes only the MOST RECENT frame, dropping stale ones so delay
     never accumulates.
+
+    Raises CameraError in the constructor if the camera is not present.
+    If the camera disappears mid-run, `is_finished` becomes True and
+    `error` holds a message.
     """
 
-    def __init__(self, url):
-        self.url = url
-        self.cap = cv2.VideoCapture(self.url)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    def __init__(self, camera_index):
+        self.index = camera_index
+        self.cap = _open_capture(camera_index)
+        if self.cap is None:
+            raise CameraError(
+                f"Camera {camera_index} is not available. "
+                "Check that it is connected and not used by another application."
+            )
+
         self.lock = threading.Lock()
         self.frame = None
         self.stopped = False
+        self.failed = False
+        self.error = None
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
 
     def _reader(self):
+        failures = 0
         while not self.stopped:
-            if not self.cap.isOpened():
-                print("Stream not open, reconnecting...")
-                time.sleep(1)
-                self.cap = cv2.VideoCapture(self.url)
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                continue
+            try:
+                ret, frame = self.cap.read()
+            except cv2.error:
+                ret, frame = False, None
 
-            ret, frame = self.cap.read()
             if not ret:
-                print("Frame read failed, reconnecting...")
-                self.cap.release()
-                time.sleep(1)
-                self.cap = cv2.VideoCapture(self.url)
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                failures += 1
+                if failures >= MAX_READ_FAILURES:
+                    self.error = (
+                        f"Camera {self.index} disconnected or stopped sending frames."
+                    )
+                    self.failed = True
+                    break
+                time.sleep(0.05)
                 continue
 
+            failures = 0
             with self.lock:
                 self.frame = frame
 
@@ -61,9 +115,8 @@ class FreshestFrame:
 
     @property
     def is_finished(self):
-        # A live camera/IP stream doesn't have a natural "end" - the
-        # worker just keeps waiting for the next frame.
-        return False
+        # A live camera has no natural end, but if it was lost we stop.
+        return self.failed
 
 
 class FileFrame:
@@ -81,6 +134,7 @@ class FileFrame:
         self.cap = cv2.VideoCapture(path)
         self.finished = False
         self.stopped = False
+        self.error = None
 
     def read(self):
         if self.stopped:
@@ -112,7 +166,7 @@ class BoxSmoother:
     Keeps a smoothed bounding box per tracker ID and holds it on screen
     for a short grace period after the tracker briefly loses the object.
 
-    Also de-duplicates tracks whose boxes overlap heavily (see
+    Also, de-duplicates tracks whose boxes overlap heavily (see
     `_dedupe_overlapping_tracks`) - this is the fix for boxes that
     "double up" for a beat whenever ByteTrack swaps a track's ID.
     """
@@ -172,9 +226,12 @@ class BoxSmoother:
         """
         When ByteTrack drops a track and assigns a new ID to the same
         physical object a frame or two later (common with brief
-        occlusion or motion blur), the old held box and the new box can
-        both be on screen for up to `hold_frames` frames. Collapse any
-        pair of tracks whose boxes overlap above `overlap_iou_thresh`,
+        occlusion or motion blur),
+
+        the old held box and the new box can
+        both be on screen for up to `hold_frames` frames.
+
+        Collapse any pair of tracks whose boxes overlap above `overlap_iou_thresh`,
         keeping the fresher (lower age) / higher-confidence one.
         """
         ids = list(self.tracks.keys())
@@ -221,11 +278,14 @@ def iou(box_a, box_b):
     inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
     inter_w, inter_h = max(0.0, inter_x2 - inter_x1), max(0.0, inter_y2 - inter_y1)
     inter_area = inter_w * inter_h
+
     if inter_area <= 0:
         return 0.0
+
     area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
     area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
     union = area_a + area_b - inter_area
+
     return inter_area / union if union > 0 else 0.0
 
 

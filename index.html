@@ -1,626 +1,820 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Tablet QC — Live Inspection</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #12151a;
-    --panel: #1b1f26;
-    --hairline: #2a2f38;
-    --text: #e9ece8;
-    --text-dim: #7c8794;
-    --good: #35d68f;
-    --alert: #ff5a5f;
-    --amber: #ffb454;
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tablet QC — Live Inspection</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #12151a;
+        --panel: #1b1f26;
+        --hairline: #2a2f38;
+        --text: #e9ece8;
+        --text-dim: #7c8794;
+        --good: #35d68f;
+        --alert: #ff5a5f;
+        --amber: #ffb454;
+      }
 
-  * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: "IBM Plex Sans", sans-serif;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 32px 20px 60px;
-  }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "IBM Plex Sans", sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 32px 20px 60px;
+      }
 
-  .shell { width: 100%; max-width: 1120px; }
+      .shell {
+        width: 100%;
+        max-width: 1120px;
+      }
 
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--hairline);
-    margin-bottom: 28px;
-    flex-wrap: wrap;
-    gap: 16px;
-  }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--hairline);
+        margin-bottom: 28px;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
 
-  .title-block .eyebrow {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0 0 4px;
-  }
+      .title-block .eyebrow {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin: 0 0 4px;
+      }
 
-  .title-block h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
+      .title-block h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
 
-  .status-cluster { display: flex; align-items: center; gap: 18px; }
+      .status-cluster {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
 
-  .status-pill {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    color: var(--text-dim);
-  }
+      .status-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+      }
 
-  .dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--text-dim);
-    box-shadow: none;
-    transition: background 0.25s ease, box-shadow 0.25s ease;
-  }
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--text-dim);
+        box-shadow: none;
+        transition:
+          background 0.25s ease,
+          box-shadow 0.25s ease;
+      }
 
-  .dot.idle { background: var(--amber); box-shadow: 0 0 0 0 rgba(255,180,84,0.5); animation: pulse-amber 2s infinite; }
-  .dot.live { background: var(--good); box-shadow: 0 0 0 0 rgba(53,214,143,0.5); animation: pulse-good 1.6s infinite; }
-  .dot.alert { background: var(--alert); box-shadow: 0 0 0 0 rgba(255,90,95,0.5); animation: pulse-alert 0.9s infinite; }
+      .dot.idle {
+        background: var(--amber);
+        box-shadow: 0 0 0 0 rgba(255, 180, 84, 0.5);
+        animation: pulse-amber 2s infinite;
+      }
+      .dot.live {
+        background: var(--good);
+        box-shadow: 0 0 0 0 rgba(53, 214, 143, 0.5);
+        animation: pulse-good 1.6s infinite;
+      }
+      .dot.alert {
+        background: var(--alert);
+        box-shadow: 0 0 0 0 rgba(255, 90, 95, 0.5);
+        animation: pulse-alert 0.9s infinite;
+      }
 
-  @keyframes pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(255,180,84,0.45);} 70% { box-shadow: 0 0 0 8px rgba(255,180,84,0);} 100% { box-shadow: 0 0 0 0 rgba(255,180,84,0);} }
-  @keyframes pulse-good  { 0% { box-shadow: 0 0 0 0 rgba(53,214,143,0.45);} 70% { box-shadow: 0 0 0 8px rgba(53,214,143,0);} 100% { box-shadow: 0 0 0 0 rgba(53,214,143,0);} }
-  @keyframes pulse-alert { 0% { box-shadow: 0 0 0 0 rgba(255,90,95,0.5);} 70% { box-shadow: 0 0 0 7px rgba(255,90,95,0);} 100% { box-shadow: 0 0 0 0 rgba(255,90,95,0);} }
+      @keyframes pulse-amber {
+        0% {
+          box-shadow: 0 0 0 0 rgba(255, 180, 84, 0.45);
+        }
+        70% {
+          box-shadow: 0 0 0 8px rgba(255, 180, 84, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 180, 84, 0);
+        }
+      }
+      @keyframes pulse-good {
+        0% {
+          box-shadow: 0 0 0 0 rgba(53, 214, 143, 0.45);
+        }
+        70% {
+          box-shadow: 0 0 0 8px rgba(53, 214, 143, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(53, 214, 143, 0);
+        }
+      }
+      @keyframes pulse-alert {
+        0% {
+          box-shadow: 0 0 0 0 rgba(255, 90, 95, 0.5);
+        }
+        70% {
+          box-shadow: 0 0 0 7px rgba(255, 90, 95, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 90, 95, 0);
+        }
+      }
 
-  button.ctrl {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 10px 18px;
-    cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease;
-  }
-  button.ctrl:hover { border-color: var(--good); color: var(--good); }
-  button.ctrl.stop:hover { border-color: var(--alert); color: var(--alert); }
-  button.ctrl:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
+      button.ctrl {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 10px 18px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          color 0.15s ease;
+      }
+      button.ctrl:hover {
+        border-color: var(--good);
+        color: var(--good);
+      }
+      button.ctrl.stop:hover {
+        border-color: var(--alert);
+        color: var(--alert);
+      }
+      button.ctrl:focus-visible {
+        outline: 2px solid var(--good);
+        outline-offset: 2px;
+      }
 
-  .main-grid {
-    display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 24px;
-    align-items: start;
-  }
+      select.camera-select {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 10px 12px;
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+      }
+      select.camera-select:hover:not(:disabled) {
+        border-color: var(--good);
+      }
+      select.camera-select:focus-visible {
+        outline: 2px solid var(--good);
+        outline-offset: 2px;
+      }
+      select.camera-select:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
 
-  .viewport {
-    position: relative;
-    background: #05070a;
-    border-radius: 10px;
-    overflow: hidden;
-    aspect-ratio: 4 / 3;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 24px;
+        align-items: start;
+      }
 
-  .viewport img { width: 100%; height: 100%; object-fit: contain; display: none; }
+      .viewport {
+        position: relative;
+        background: #05070a;
+        border-radius: 10px;
+        overflow: hidden;
+        aspect-ratio: 4 / 3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-  .viewport .corner {
-    position: absolute;
-    width: 26px;
-    height: 26px;
-    border: 2px solid var(--amber);
-    opacity: 0.55;
-    z-index: 2;
-  }
-  .corner.tl { top: 12px; left: 12px; border-right: none; border-bottom: none; }
-  .corner.tr { top: 12px; right: 12px; border-left: none; border-bottom: none; }
-  .corner.bl { bottom: 12px; left: 12px; border-right: none; border-top: none; }
-  .corner.br { bottom: 12px; right: 12px; border-left: none; border-top: none; }
+      .viewport img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: none;
+      }
 
-  .placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-dim);
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    text-align: center;
-    padding: 20px;
-  }
+      .viewport .corner {
+        position: absolute;
+        width: 26px;
+        height: 26px;
+        border: 2px solid var(--amber);
+        opacity: 0.55;
+        z-index: 2;
+      }
+      .corner.tl {
+        top: 12px;
+        left: 12px;
+        border-right: none;
+        border-bottom: none;
+      }
+      .corner.tr {
+        top: 12px;
+        right: 12px;
+        border-left: none;
+        border-bottom: none;
+      }
+      .corner.bl {
+        bottom: 12px;
+        left: 12px;
+        border-right: none;
+        border-top: none;
+      }
+      .corner.br {
+        bottom: 12px;
+        right: 12px;
+        border-left: none;
+        border-top: none;
+      }
 
-  .source-switch {
-    display: flex;
-    gap: 8px;
-    margin-top: 20px;
-  }
+      .placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-dim);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-align: center;
+        padding: 20px;
+      }
 
-  .src-btn {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    background: transparent;
-    color: var(--text-dim);
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 9px 16px;
-    cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-  }
-  .src-btn:hover { color: var(--text); border-color: var(--text-dim); }
-  .src-btn.active {
-    color: var(--bg);
-    background: var(--text);
-    border-color: var(--text);
-  }
-  .src-btn:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
+      .source-switch {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+      }
 
-  .upload-panel {
-    display: none;
-    align-items: center;
-    gap: 12px;
-    margin-top: 14px;
-    padding: 16px 18px;
-    background: var(--panel);
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    flex-wrap: wrap;
-  }
-  .upload-panel.visible { display: flex; }
+      .src-btn {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: transparent;
+        color: var(--text-dim);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 9px 16px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          color 0.15s ease,
+          background 0.15s ease;
+      }
+      .src-btn:hover {
+        color: var(--text);
+        border-color: var(--text-dim);
+      }
+      .src-btn.active {
+        color: var(--bg);
+        background: var(--text);
+        border-color: var(--text);
+      }
+      .src-btn:focus-visible {
+        outline: 2px solid var(--good);
+        outline-offset: 2px;
+      }
 
-  .upload-panel input[type="file"] {
-    flex: 1;
-    min-width: 200px;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .upload-panel input[type="file"]::file-selector-button {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 7px 12px;
-    margin-right: 10px;
-    cursor: pointer;
-  }
-  .upload-panel input[type="file"]::file-selector-button:hover { border-color: var(--good); }
+      .upload-panel {
+        display: none;
+        align-items: center;
+        gap: 12px;
+        margin-top: 14px;
+        padding: 16px 18px;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        flex-wrap: wrap;
+      }
+      .upload-panel.visible {
+        display: flex;
+      }
 
-  .upload-hint {
-    width: 100%;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.03em;
-  }
+      .upload-panel input[type="file"] {
+        flex: 1;
+        min-width: 200px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+      .upload-panel input[type="file"]::file-selector-button {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 7px 12px;
+        margin-right: 10px;
+        cursor: pointer;
+      }
+      .upload-panel input[type="file"]::file-selector-button:hover {
+        border-color: var(--good);
+      }
 
-  button.ctrl:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  button.ctrl:disabled:hover { border-color: var(--hairline); color: var(--text); }
+      .upload-hint {
+        width: 100%;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.03em;
+      }
 
-  .error-banner {
-    display: none;
-    margin-top: 20px;
-    padding: 12px 16px;
-    border: 1px solid var(--alert);
-    border-radius: 6px;
-    color: var(--alert);
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12px;
-    line-height: 1.5;
-  }
+      button.ctrl:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button.ctrl:disabled:hover {
+        border-color: var(--hairline);
+        color: var(--text);
+      }
 
-  .kpi-col {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    height: 100%;
-  }
+      .error-banner {
+        display: none;
+        margin-top: 20px;
+        padding: 12px 16px;
+        border: 1px solid var(--alert);
+        border-radius: 6px;
+        color: var(--alert);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+      }
 
-  .kpi {
-    background: var(--panel);
-    border: 1px solid var(--hairline);
-    border-radius: 10px;
-    padding: 24px 26px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-  }
+      .kpi-col {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        height: 100%;
+      }
 
-  .kpi .label {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 10px;
-  }
+      .kpi {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        padding: 24px 26px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+      }
 
-  .kpi .value {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 56px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
-  }
+      .kpi .label {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 10px;
+      }
 
-  .kpi.broken .value { color: var(--alert); }
-  .kpi.total .value { color: var(--text); }
-  .kpi.good .value { color: var(--good); }
+      .kpi .value {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 56px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
 
-  footer {
-    margin-top: 26px;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.04em;
-  }
+      .kpi.broken .value {
+        color: var(--alert);
+      }
+      .kpi.total .value {
+        color: var(--text);
+      }
+      .kpi.good .value {
+        color: var(--good);
+      }
 
-  @media (prefers-reduced-motion: reduce) {
-    .dot { animation: none !important; }
-  }
+      footer {
+        margin-top: 26px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.04em;
+      }
 
-  @media (max-width: 720px) {
-    .main-grid { grid-template-columns: 1fr; }
-    .kpi-col { flex-direction: row; }
-  }
-</style>
-</head>
-<body>
-  <div class="shell">
-    <header>
-      <div class="title-block">
-        <p class="eyebrow">Line 01 · Inspection</p>
-        <h1>Tablet QC — Live Detection</h1>
+      @media (prefers-reduced-motion: reduce) {
+        .dot {
+          animation: none !important;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+        .kpi-col {
+          flex-direction: row;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div class="title-block">
+          <p class="eyebrow">Line 01 · Inspection</p>
+          <h1>Tablet QC — Live Detection</h1>
+        </div>
+        <div class="status-cluster">
+          <div class="status-pill">
+            <span class="dot idle" id="statusDot"></span>
+            <span id="statusText">Idle</span>
+          </div>
+          <select
+            class="camera-select"
+            id="cameraSelect"
+            aria-label="Select camera"
+          >
+            <option value="0">Camera 0</option>
+            <option value="1">Camera 1</option>
+          </select>
+          <button class="ctrl" id="startBtn">Start</button>
+          <button class="ctrl stop" id="stopBtn">Stop</button>
+        </div>
+      </header>
+
+      <div class="main-grid">
+        <div class="viewport">
+          <span class="corner tl"></span>
+          <span class="corner tr"></span>
+          <span class="corner bl"></span>
+          <span class="corner br"></span>
+          <img id="videoImg" alt="Labeled detection feed" />
+          <div class="placeholder" id="placeholder">
+            No signal<br />Select a camera and press Start
+          </div>
+        </div>
+
+        <div class="kpi-col">
+          <div class="kpi total">
+            <div class="label">Total Count</div>
+            <div class="value" id="totalValue">0</div>
+          </div>
+          <div class="kpi good">
+            <div class="label">Tablet Count</div>
+            <div class="value" id="tabletValue">0</div>
+          </div>
+          <div class="kpi broken">
+            <div class="label">Broken Count</div>
+            <div class="value" id="brokenValue">0</div>
+          </div>
+        </div>
       </div>
-      <div class="status-cluster">
-        <div class="status-pill">
-          <span class="dot idle" id="statusDot"></span>
-          <span id="statusText">Idle</span>
-        </div>
-        <button class="ctrl" id="startBtn">Start</button>
-        <button class="ctrl stop" id="stopBtn">Stop</button>
-      </div>
-    </header>
 
-    <div class="main-grid">
-      <div class="viewport">
-        <span class="corner tl"></span>
-        <span class="corner tr"></span>
-        <span class="corner bl"></span>
-        <span class="corner br"></span>
-        <img id="videoImg" alt="Labeled detection feed" />
-        <div class="placeholder" id="placeholder">
-          No signal<br />Press Start to begin inspection
-        </div>
+      <div class="source-switch" id="sourceSwitch">
+        <button class="src-btn active" data-mode="live" type="button">
+          Live Camera
+        </button>
+        <button class="src-btn" data-mode="video" type="button">
+          Upload Video
+        </button>
+        <button class="src-btn" data-mode="image" type="button">
+          Upload Image
+        </button>
       </div>
 
-      <div class="kpi-col">
-        <div class="kpi total">
-          <div class="label">Total Count</div>
-          <div class="value" id="totalValue">0</div>
-        </div>
-        <div class="kpi good">
-          <div class="label">Tablet Count</div>
-          <div class="value" id="tabletValue">0</div>
-        </div>
-        <div class="kpi broken">
-          <div class="label">Broken Count</div>
-          <div class="value" id="brokenValue">0</div>
-        </div>
+      <div class="upload-panel" id="uploadPanel">
+        <input type="file" id="fileInput" accept="video/*" />
+        <button class="ctrl" id="runUploadBtn">Run Inspection</button>
+        <span class="upload-hint" id="uploadHint"
+          >Choose a video file, then run inspection.</span
+        >
       </div>
+
+      <div class="error-banner" id="errorBanner"></div>
+
+      <footer>· Automated Optical Inspection (AOI) system</footer>
     </div>
 
-    <div class="source-switch" id="sourceSwitch">
-      <button class="src-btn active" data-mode="live" type="button">Live Camera</button>
-      <button class="src-btn" data-mode="video" type="button">Upload Video</button>
-      <button class="src-btn" data-mode="image" type="button">Upload Image</button>
-    </div>
+    <script>
+      const videoImg = document.getElementById("videoImg");
+      const placeholder = document.getElementById("placeholder");
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      const totalValue = document.getElementById("totalValue");
+      const tabletValue = document.getElementById("tabletValue");
+      const brokenValue = document.getElementById("brokenValue");
+      const errorBanner = document.getElementById("errorBanner");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const cameraSelect = document.getElementById("cameraSelect");
+      const sourceSwitch = document.getElementById("sourceSwitch");
+      const uploadPanel = document.getElementById("uploadPanel");
+      const fileInput = document.getElementById("fileInput");
+      const runUploadBtn = document.getElementById("runUploadBtn");
+      const uploadHint = document.getElementById("uploadHint");
 
-    <div class="upload-panel" id="uploadPanel">
-      <input type="file" id="fileInput" accept="video/*" />
-      <button class="ctrl" id="runUploadBtn">Run Inspection</button>
-      <span class="upload-hint" id="uploadHint">Choose a video file, then run inspection.</span>
-    </div>
+      let pollTimer = null;
+      let currentMode = "live"; // 'live' | 'video' | 'image'
 
-    <div class="error-banner" id="errorBanner"></div>
+      function setDot(state) {
+        statusDot.className = "dot " + state;
+      }
 
-    <footer> · Automated Optical Inspection (AOI) system</footer>
-  </div>
+      function showError(msg) {
+        if (!msg) {
+          errorBanner.style.display = "none";
+          return;
+        }
+        errorBanner.textContent = msg;
+        errorBanner.style.display = "block";
+      }
 
-<script>
-  const videoImg = document.getElementById('videoImg');
-  const placeholder = document.getElementById('placeholder');
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-  const totalValue = document.getElementById('totalValue');
-  const tabletValue = document.getElementById('tabletValue');
-  const brokenValue = document.getElementById('brokenValue');
-  const errorBanner = document.getElementById('errorBanner');
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-  const sourceSwitch = document.getElementById('sourceSwitch');
-  const uploadPanel = document.getElementById('uploadPanel');
-  const fileInput = document.getElementById('fileInput');
-  const runUploadBtn = document.getElementById('runUploadBtn');
-  const uploadHint = document.getElementById('uploadHint');
+      function resetCounts() {
+        totalValue.textContent = "0";
+        tabletValue.textContent = "0";
+        brokenValue.textContent = "0";
+      }
 
-  let pollTimer = null;
-  let currentMode = 'live'; // 'live' | 'video' | 'image'
+      function showFrame(src) {
+        videoImg.src = src;
+        videoImg.style.display = "block";
+        placeholder.style.display = "none";
+      }
 
-  function setDot(state) {
-    statusDot.className = 'dot ' + state;
-  }
+      function clearFrame() {
+        videoImg.removeAttribute("src");
+        videoImg.style.display = "none";
+        placeholder.style.display = "flex";
+      }
 
-  function showError(msg) {
-    if (!msg) {
-      errorBanner.style.display = 'none';
-      return;
-    }
-    errorBanner.textContent = msg;
-    errorBanner.style.display = 'block';
-  }
+      // ---- Live camera (Start/Stop, MJPEG + polling) ----
 
-  function resetCounts() {
-    totalValue.textContent = '0';
-    tabletValue.textContent = '0';
-    brokenValue.textContent = '0';
-  }
+      async function startStream() {
+        showError(null);
+        const camera = cameraSelect.value;
+        setDot("idle");
+        statusText.textContent = `Connecting to camera ${camera}…`;
+        startBtn.disabled = true;
+        cameraSelect.disabled = true;
 
-  function showFrame(src) {
-    videoImg.src = src;
-    videoImg.style.display = 'block';
-    placeholder.style.display = 'none';
-  }
+        let res;
+        try {
+          res = await fetch("/start?camera=" + encodeURIComponent(camera), {
+            method: "POST",
+          });
+        } catch (e) {
+          showError("Could not reach the backend. Is app.py running?");
+          statusText.textContent = "Idle";
+          setDot("idle");
+          startBtn.disabled = false;
+          cameraSelect.disabled = false;
+          return;
+        }
 
-  function clearFrame() {
-    videoImg.removeAttribute('src');
-    videoImg.style.display = 'none';
-    placeholder.style.display = 'flex';
-  }
+        startBtn.disabled = false;
 
-  // ---- Live camera (Start/Stop, MJPEG + polling) ----
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          // e.g. "Camera 1 is not available. Check that it is connected ..."
+          showError(data.message || `Could not start camera ${camera}.`);
+          statusText.textContent = "Camera unavailable";
+          setDot("idle");
+          cameraSelect.disabled = false;
+          clearFrame();
+          return;
+        }
 
-  async function startStream() {
-    setDot('idle');
-    statusText.textContent = 'Connecting…';
-    let res;
-    try {
-      res = await fetch('/start', { method: 'POST' });
-    } catch (e) {
-      showError('Could not reach the backend. Is app.py running?');
-      return;
-    }
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      showError(data.message || 'Could not start the pipeline.');
-      statusText.textContent = 'Idle';
-      setDot('idle');
-      return;
-    }
-    showFrame('/video_feed?t=' + Date.now());
-    startPolling();
-  }
+        showFrame("/video_feed?t=" + Date.now());
+        startPolling();
+      }
 
-  async function stopStream() {
-    try {
-      await fetch('/stop', { method: 'POST' });
-    } catch (e) { /* ignore */ }
-    clearFrame();
-    statusText.textContent = 'Idle';
-    setDot('idle');
-    stopPolling();
-  }
+      async function stopStream() {
+        try {
+          await fetch("/stop", { method: "POST" });
+        } catch (e) {
+          /* ignore */
+        }
+        clearFrame();
+        statusText.textContent = "Idle";
+        setDot("idle");
+        cameraSelect.disabled = false;
+        stopPolling();
+      }
 
-  function startPolling() {
-    stopPolling();
-    pollTimer = setInterval(async () => {
-      try {
-        const res = await fetch('/counts');
-        const data = await res.json();
+      function startPolling() {
+        stopPolling();
+        pollTimer = setInterval(async () => {
+          try {
+            const res = await fetch("/counts");
+            const data = await res.json();
+            totalValue.textContent = data.total;
+            tabletValue.textContent = data.tablet;
+            brokenValue.textContent = data.broken;
+            showError(data.error);
+
+            if (!data.running) {
+              statusText.textContent = data.error ? "Error" : "Idle";
+              setDot("idle");
+              cameraSelect.disabled = false;
+              if (data.error) {
+                // e.g. the camera was unplugged mid-run - drop the frozen frame
+                clearFrame();
+              }
+              if (currentMode === "video" || data.error) {
+                // The uploaded video reached its end, or the pipeline died
+                // with an error - the backend already stopped on its own.
+                stopPolling();
+              }
+              return;
+            }
+            if (data.broken > 0) {
+              statusText.textContent = "Defect detected";
+              setDot("alert");
+            } else {
+              statusText.textContent =
+                currentMode === "video" ? "Processing video" : "Running";
+              setDot("live");
+            }
+          } catch (e) {
+            statusText.textContent = "Connection lost";
+            setDot("idle");
+          }
+        }, 400);
+      }
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      // ---- Uploaded video (same streamed pipeline, different source) ----
+
+      async function runUploadedVideo(file) {
+        resetCounts();
+        showError(null);
+        setDot("idle");
+        statusText.textContent = "Uploading…";
+        runUploadBtn.disabled = true;
+
+        const form = new FormData();
+        form.append("file", file);
+
+        let res;
+        try {
+          res = await fetch("/upload_video", { method: "POST", body: form });
+        } catch (e) {
+          showError("Could not reach the backend. Is app.py running?");
+          statusText.textContent = "Idle";
+          runUploadBtn.disabled = false;
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        runUploadBtn.disabled = false;
+
+        if (!res.ok) {
+          showError(data.message || "Could not process the uploaded video.");
+          statusText.textContent = "Idle";
+          return;
+        }
+
+        showFrame("/video_feed?t=" + Date.now());
+        startPolling();
+      }
+
+      // ---- Uploaded image (single request/response, no streaming) ----
+
+      async function runUploadedImage(file) {
+        resetCounts();
+        showError(null);
+        clearFrame();
+        setDot("idle");
+        statusText.textContent = "Analyzing…";
+        runUploadBtn.disabled = true;
+
+        const form = new FormData();
+        form.append("file", file);
+
+        let res;
+        try {
+          res = await fetch("/upload_image", { method: "POST", body: form });
+        } catch (e) {
+          showError("Could not reach the backend. Is app.py running?");
+          statusText.textContent = "Idle";
+          runUploadBtn.disabled = false;
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        runUploadBtn.disabled = false;
+
+        if (!res.ok) {
+          showError(data.message || "Could not process the uploaded image.");
+          statusText.textContent = "Idle";
+          return;
+        }
+
+        showFrame(data.image);
         totalValue.textContent = data.total;
         tabletValue.textContent = data.tablet;
         brokenValue.textContent = data.broken;
-        showError(data.error);
+        statusText.textContent = data.broken > 0 ? "Defect detected" : "Done";
+        setDot(data.broken > 0 ? "alert" : "live");
+      }
 
-        if (!data.running) {
-          statusText.textContent = data.error ? 'Error' : 'Idle';
-          setDot('idle');
-          if (currentMode === 'video') {
-            // The uploaded video reached its end - the backend already
-            // stopped the pipeline on its own.
-            stopPolling();
+      // ---- Mode switching ----
+
+      async function setMode(mode) {
+        if (mode === currentMode) return;
+
+        // Leaving any active pipeline before switching sources.
+        await stopStream();
+        resetCounts();
+        showError(null);
+        clearFrame();
+        fileInput.value = "";
+
+        currentMode = mode;
+
+        [...sourceSwitch.querySelectorAll(".src-btn")].forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.mode === mode);
+        });
+
+        if (mode === "live") {
+          uploadPanel.classList.remove("visible");
+          cameraSelect.style.display = "";
+          startBtn.style.display = "";
+          stopBtn.style.display = "";
+          statusText.textContent = "Idle";
+        } else {
+          uploadPanel.classList.add("visible");
+          cameraSelect.style.display = "none";
+          startBtn.style.display = "none";
+          stopBtn.style.display = "";
+          statusText.textContent = "Idle";
+          if (mode === "video") {
+            fileInput.accept = "video/*";
+            uploadHint.textContent =
+              "Choose a video file, then run inspection.";
+          } else {
+            fileInput.accept = "image/*";
+            uploadHint.textContent =
+              "Choose an image file, then run inspection.";
           }
+        }
+      }
+
+      sourceSwitch.addEventListener("click", (e) => {
+        const btn = e.target.closest(".src-btn");
+        if (btn) setMode(btn.dataset.mode);
+      });
+
+      runUploadBtn.addEventListener("click", () => {
+        const file = fileInput.files[0];
+        if (!file) {
+          showError("Choose a file first.");
           return;
         }
-        if (data.broken > 0) {
-          statusText.textContent = 'Defect detected';
-          setDot('alert');
-        } else {
-          statusText.textContent = currentMode === 'video' ? 'Processing video' : 'Running';
-          setDot('live');
+        if (currentMode === "video") {
+          runUploadedVideo(file);
+        } else if (currentMode === "image") {
+          runUploadedImage(file);
         }
-      } catch (e) {
-        statusText.textContent = 'Connection lost';
-        setDot('idle');
-      }
-    }, 400);
-  }
+      });
 
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  // ---- Uploaded video (same streamed pipeline, different source) ----
-
-  async function runUploadedVideo(file) {
-    resetCounts();
-    showError(null);
-    setDot('idle');
-    statusText.textContent = 'Uploading…';
-    runUploadBtn.disabled = true;
-
-    const form = new FormData();
-    form.append('file', file);
-
-    let res;
-    try {
-      res = await fetch('/upload_video', { method: 'POST', body: form });
-    } catch (e) {
-      showError('Could not reach the backend. Is app.py running?');
-      statusText.textContent = 'Idle';
-      runUploadBtn.disabled = false;
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    runUploadBtn.disabled = false;
-
-    if (!res.ok) {
-      showError(data.message || 'Could not process the uploaded video.');
-      statusText.textContent = 'Idle';
-      return;
-    }
-
-    showFrame('/video_feed?t=' + Date.now());
-    startPolling();
-  }
-
-  // ---- Uploaded image (single request/response, no streaming) ----
-
-  async function runUploadedImage(file) {
-    resetCounts();
-    showError(null);
-    clearFrame();
-    setDot('idle');
-    statusText.textContent = 'Analyzing…';
-    runUploadBtn.disabled = true;
-
-    const form = new FormData();
-    form.append('file', file);
-
-    let res;
-    try {
-      res = await fetch('/upload_image', { method: 'POST', body: form });
-    } catch (e) {
-      showError('Could not reach the backend. Is app.py running?');
-      statusText.textContent = 'Idle';
-      runUploadBtn.disabled = false;
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    runUploadBtn.disabled = false;
-
-    if (!res.ok) {
-      showError(data.message || 'Could not process the uploaded image.');
-      statusText.textContent = 'Idle';
-      return;
-    }
-
-    showFrame(data.image);
-    totalValue.textContent = data.total;
-    tabletValue.textContent = data.tablet;
-    brokenValue.textContent = data.broken;
-    statusText.textContent = data.broken > 0 ? 'Defect detected' : 'Done';
-    setDot(data.broken > 0 ? 'alert' : 'live');
-  }
-
-  // ---- Mode switching ----
-
-  async function setMode(mode) {
-    if (mode === currentMode) return;
-
-    // Leaving any active pipeline before switching sources.
-    await stopStream();
-    resetCounts();
-    showError(null);
-    clearFrame();
-    fileInput.value = '';
-
-    currentMode = mode;
-
-    [...sourceSwitch.querySelectorAll('.src-btn')].forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
-
-    if (mode === 'live') {
-      uploadPanel.classList.remove('visible');
-      startBtn.style.display = '';
-      stopBtn.style.display = '';
-      statusText.textContent = 'Idle';
-    } else {
-      uploadPanel.classList.add('visible');
-      startBtn.style.display = 'none';
-      stopBtn.style.display = '';
-      statusText.textContent = 'Idle';
-      if (mode === 'video') {
-        fileInput.accept = 'video/*';
-        uploadHint.textContent = 'Choose a video file, then run inspection.';
-      } else {
-        fileInput.accept = 'image/*';
-        uploadHint.textContent = 'Choose an image file, then run inspection.';
-      }
-    }
-  }
-
-  sourceSwitch.addEventListener('click', (e) => {
-    const btn = e.target.closest('.src-btn');
-    if (btn) setMode(btn.dataset.mode);
-  });
-
-  runUploadBtn.addEventListener('click', () => {
-    const file = fileInput.files[0];
-    if (!file) {
-      showError('Choose a file first.');
-      return;
-    }
-    if (currentMode === 'video') {
-      runUploadedVideo(file);
-    } else if (currentMode === 'image') {
-      runUploadedImage(file);
-    }
-  });
-
-  startBtn.addEventListener('click', startStream);
-  stopBtn.addEventListener('click', stopStream);
-</script>
-</body>
+      startBtn.addEventListener("click", startStream);
+      stopBtn.addEventListener("click", stopStream);
+    </script>
+  </body>
 </html>

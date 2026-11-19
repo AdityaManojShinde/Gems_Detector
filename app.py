@@ -15,6 +15,7 @@ from ultralytics import YOLO
 
 from utils import (
     BoxSmoother,
+    CameraError,
     FileFrame,
     FreshestFrame,
     SharedState,
@@ -41,8 +42,9 @@ except ImportError:
 
 
 # CONFIG 
-MODEL_PATH = "./model/yolo11s_v2.pt"       # path to trained YOLO .pt file
-STREAM_URL = "http://192.168.1.4:8080/video"                # IP webcam stream URL
+MODEL_PATH = "./model/yolo11s_v1.pt"       # path to trained YOLO .pt file
+AVAILABLE_CAMERAS = (0, 1)                                  # local camera indexes offered in the dropdown
+DEFAULT_CAMERA = 0
 CONF_THRESHOLD = 0.4                                        # confidence threshold
 IMGSZ = 640                                                 # inference image size
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -100,26 +102,21 @@ def _load_model():
     return _model_holder["model"]
 
 
-def _inference_worker(stop_event, source, is_live):
+def _inference_worker(stop_event, stream):
     """
-    Owns the frame source (live camera or an uploaded video file) and the
-    YOLO/tracker/smoother pipeline. Runs independently of any HTTP request -
-    starting/stopping/refreshing browser tabs never touches this loop.
+    Owns the already-opened frame source (local camera or an uploaded video
+    file) and the YOLO/tracker/smoother pipeline. Runs independently of any
+    HTTP request - starting/stopping/refreshing browser tabs never touches
+    this loop.
     """
     try:
         model = _load_model()
     except FileNotFoundError as exc:  # bad MODEL_PATH, etc.
+        stream.stop()  # release the camera/file we were handed
         with shared.lock:
             shared.error = f"Failed to load model: {exc}"
             shared.running = False
         return
-
-    if is_live:
-        print(f"Connecting to stream: {source}")
-        stream = FreshestFrame(source)
-    else:
-        print(f"Reading uploaded video: {source}")
-        stream = FileFrame(source)
 
     smoother = BoxSmoother()
 
@@ -178,8 +175,11 @@ def _inference_worker(stop_event, source, is_live):
         with shared.lock:
             shared.error = f"Pipeline error: {exc}"
     finally:
+        stream_error = getattr(stream, "error", None)  # e.g. camera unplugged
         stream.stop()
         with shared.lock:
+            if stream_error:
+                shared.error = stream_error
             shared.running = False
             shared.jpeg_bytes = None
         print("Inference worker stopped, camera released.")
@@ -236,26 +236,54 @@ def counts():
         })
 
 
-def _start_worker(source, is_live, mode):
+def _start_worker(make_stream, mode):
+    """
+    Claim the pipeline, build the frame source via `make_stream()` (which may
+    raise CameraError), and start the worker. If the source can't be opened,
+    the pipeline is released again and a 400 with a readable message is
+    returned.
+    """
     global _worker_thread, _stop_event
     with shared.lock:
         if shared.running:
-            return JSONResponse({"status": "already_running"}, status_code=409)
+            return JSONResponse(
+                {"status": "already_running", "message": "Pipeline already running - stop it first."},
+                status_code=409,
+            )
         shared.running = True
         shared.error = None
         shared.mode = mode
+
+    try:
+        stream = make_stream()
+    except CameraError as exc:
+        with shared.lock:
+            shared.running = False
+        return JSONResponse({"status": "error", "message": str(exc)}, status_code=400)
+    except Exception as exc:  # noqa: BLE001 - never leave the pipeline "claimed"
+        with shared.lock:
+            shared.running = False
+        return JSONResponse(
+            {"status": "error", "message": f"Could not open source: {exc}"}, status_code=500
+        )
+
     _stop_event = threading.Event()
     _worker_thread = threading.Thread(
-        target=_inference_worker, args=(_stop_event, source, is_live), daemon=True
+        target=_inference_worker, args=(_stop_event, stream), daemon=True
     )
     _worker_thread.start()
     return JSONResponse({"status": "started", "mode": mode})
 
 
 @app.post("/start")
-def start_pipeline():
-    """Start (or resume) live inspection from the configured camera/IP stream."""
-    return _start_worker(STREAM_URL, is_live=True, mode="live")
+def start_pipeline(camera: int = DEFAULT_CAMERA):
+    """Start (or resume) live inspection from the selected local camera."""
+    if camera not in AVAILABLE_CAMERAS:
+        return JSONResponse(
+            {"status": "error", "message": f"Unknown camera {camera}."}, status_code=400
+        )
+    print(f"Opening camera {camera}")
+    return _start_worker(lambda: FreshestFrame(camera), mode="live")
 
 
 @app.post("/upload_video")
@@ -300,7 +328,7 @@ async def upload_video(file: Annotated[UploadFile, File(...)]):
             status_code=400,
         )
 
-    return _start_worker(dest_path, is_live=False, mode="video")
+    return _start_worker(lambda: FileFrame(dest_path), mode="video")
 
 
 @app.post("/upload_image")
@@ -382,6 +410,11 @@ async def upload_image(file: Annotated[UploadFile, File(...)]):
 @app.post("/stop")
 def stop_pipeline():
     _stop_event.set()
+    # Wait briefly for the worker to release the camera, so switching
+    # straight to the other camera (or restarting) doesn't hit a busy device.
+    worker = _worker_thread
+    if worker is not None and worker.is_alive():
+        worker.join(timeout=3)
     with shared.lock:
         shared.running = False
     return JSONResponse({"status": "stopping"})
